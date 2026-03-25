@@ -1399,6 +1399,18 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
         """
         return self.model.get_image_features(pixel_values=pixel_values, image_grid_thw=image_grid_thw, **kwargs)
 
+
+    # refactor: new wrapper — mirrors get_image_features and get_video_features exactly
+    @auto_docstring
+    def get_audio_features(
+        self,
+        audio_values: torch.FloatTensor,
+        audio_lengths: torch.LongTensor | None = None,
+    ) -> torch.FloatTensor:
+        return self.model.get_audio_features(
+            audio_values=audio_values
+        )
+
     @can_return_tuple
     @auto_docstring
     def forward(
@@ -1419,6 +1431,8 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
         rope_deltas: torch.LongTensor | None = None,
         cache_position: torch.LongTensor | None = None,
         logits_to_keep: int | torch.Tensor = 0,
+        # refactor: new audio arguments
+        audio_values: torch.FloatTensor | None = None
         **kwargs: Unpack[TransformersKwargs],
     ) -> tuple | Qwen2VLCausalLMOutputWithPast:
         r"""
@@ -1490,6 +1504,8 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
             output_hidden_states=output_hidden_states,
             return_dict=True,
             cache_position=cache_position,
+            # refactor: pass audio through to Qwen2VLModel
+            audio_values=audio_values,
             **kwargs,
         )
 
