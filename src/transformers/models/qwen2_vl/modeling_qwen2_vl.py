@@ -942,13 +942,24 @@ class Qwen2VLTextModel(Qwen2VLPreTrainedModel):
 
 # Refactor: add Whisper feature extractor and encoder
 class Qwen2VLAudioModel(nn.Module):
-    def __init__(self, config: Qwen2VLAudioConfig) -> None:
+    def __init__(self, config):
         super().__init__()
         self.feature_extractor = WhisperFeatureExtractor.from_pretrained(config.model_name)
-        self.encoder = WhisperModel.from_pretrained(config.model_name)
+        self.encoder = WhisperModel.from_pretrained(config.model_name).encoder
 
-    def forward(self, audio_values, audio_lengths=None):
-        # To do
+    def forward(self, audio_values):
+        # audio_values: list of 1D numpy arrays
+        features = self.feature_extractor(
+            audio_values,
+            sampling_rate=self.feature_extractor.sampling_rate,
+            return_tensors="pt"
+        ).input_features.to(next(self.encoder.parameters()).device) # [batch, 128, 3000]
+        
+
+        hidden_states = self.encoder(features).last_hidden_state # [batch, 1500, 1280]
+        
+        return hidden_states.view(-1, hidden_states.shape[-1]) # [batch * 1500, 1280]
+        
     
 
 
