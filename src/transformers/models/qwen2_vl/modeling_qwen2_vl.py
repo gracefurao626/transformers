@@ -940,6 +940,18 @@ class Qwen2VLTextModel(Qwen2VLPreTrainedModel):
             attentions=all_self_attns,
         )
 
+# Refactor: add Whisper feature extractor and encoder
+class Qwen2VLAudioModel(nn.Module):
+    def __init__(self, config: Qwen2VLAudioConfig) -> None:
+        super().__init__()
+        self.feature_extractor = WhisperFeatureExtractor.from_pretrained(config.model_name)
+        self.encoder = WhisperModel.from_pretrained(config.model_name)
+
+    def forward(self, audio_values, audio_lengths=None):
+        # To do
+    
+
+
 
 @auto_docstring
 class Qwen2VLModel(Qwen2VLPreTrainedModel):
@@ -952,8 +964,8 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
         super().__init__(config)
         self.visual = Qwen2VisionTransformerPretrainedModel._from_config(config.vision_config)
         self.language_model = Qwen2VLTextModel._from_config(config.text_config)
-        # refactor: 
-        self.audio = 
+        # refactor
+        self.audio = Qwen2VLAudioModel._from_config(config.audio_config)
         self.rope_deltas = None  # cache rope_deltas here
 
         # Initialize weights and apply final processing
@@ -1171,7 +1183,7 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
         """
         audio_values = audio_values.type(self.audio.dtype)
         audio_outputs = self.audio(audio_values, return_dict=True, **kwargs)
-
+        # need to add projection layer to match with the LLM embedding dimension
         return audio_outputs
     
     def get_placeholder_mask(
@@ -1247,6 +1259,8 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
         video_grid_thw: torch.LongTensor | None = None,
         rope_deltas: torch.LongTensor | None = None,
         cache_position: torch.LongTensor | None = None,
+        # refactor: new audio arguments
+        audio_values: torch.FloatTensor | None = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> tuple | Qwen2VLModelOutputWithPast:
         r"""
@@ -1282,6 +1296,16 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
                 input_ids, inputs_embeds=inputs_embeds, video_features=video_embeds
             )
             inputs_embeds = inputs_embeds.masked_scatter(video_mask, video_embeds)
+
+        # refactor: audio injection block — mirrors image and video blocks exactly
+        if audio_values is not None:
+            audio_embeds = self.get_audio_features(audio_values)
+            # audio_embeds: [N_clips * 1500, 3584]
+            audio_embeds = audio_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
+            _, _, audio_mask = self.get_placeholder_mask(
+                input_ids, inputs_embeds=inputs_embeds, audio_features=audio_embeds
+            )
+            inputs_embeds = inputs_embeds.masked_scatter(audio_mask, audio_embeds)
 
         if position_ids is None:
             past_key_values_length = 0 if past_key_values is None else past_key_values.get_seq_length()
