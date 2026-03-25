@@ -952,6 +952,8 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
         super().__init__(config)
         self.visual = Qwen2VisionTransformerPretrainedModel._from_config(config.vision_config)
         self.language_model = Qwen2VLTextModel._from_config(config.text_config)
+        # refactor: 
+        self.audio = 
         self.rope_deltas = None  # cache rope_deltas here
 
         # Initialize weights and apply final processing
@@ -1155,13 +1157,30 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
         vision_outputs.pooler_output = image_embeds
 
         return vision_outputs
+    
+    # refactor
+    @can_return_tuple
+    @auto_docstring
+    def get_audio_features(
+        self,
+        audio_values: torch.FloatTensor,
+        **kwargs: Unpack[TransformersKwargs],
+    ) -> tuple | BaseModelOutputWithPooling:
+        r"""
+        audio_values: 
+        """
+        audio_values = audio_values.type(self.audio.dtype)
+        audio_outputs = self.audio(audio_values, return_dict=True, **kwargs)
 
+        return audio_outputs
+    
     def get_placeholder_mask(
         self,
         input_ids: torch.LongTensor,
         inputs_embeds: torch.FloatTensor,
         image_features: torch.FloatTensor | None = None,
         video_features: torch.FloatTensor | None = None,
+        audio_features: torch.FloatTensor | None = None,
     ):
         """
         Obtains multimodal placeholder mask from `input_ids` or `inputs_embeds`, and checks that the placeholder token count is
@@ -1176,9 +1195,14 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
                 torch.tensor(self.config.video_token_id, dtype=torch.long, device=inputs_embeds.device)
             )
             special_video_mask = special_video_mask.all(-1)
+            special_audio_mask = inputs_embeds == self.get_input_embeddings()(
+                torch.tensor(self.config.audio_token_id, dtype=torch.long, device=inputs_embeds.device)
+            )
+            special_audio_mask = special_audio_mask.all(-1)
         else:
             special_image_mask = input_ids == self.config.image_token_id
             special_video_mask = input_ids == self.config.video_token_id
+            special_audio_mask = input_ids == self.config.audio_token_id
 
         n_image_tokens = special_image_mask.sum()
         special_image_mask = special_image_mask.unsqueeze(-1).expand_as(inputs_embeds).to(inputs_embeds.device)
@@ -1195,7 +1219,15 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
                 inputs_embeds[special_video_mask].numel() == video_features.numel(),
                 f"Video features and video tokens do not match, tokens: {n_video_tokens}, features: {video_features.shape[0]}",
             )
-        return special_image_mask, special_video_mask
+        
+        n_audio_tokens = special_audio_mask.sum()
+        special_audio_mask = special_audio_mask.unsqueeze(-1).expand_as(inputs_embeds).to(inputs_embeds.device)
+        if audio_features is not None:
+            torch_compilable_check(
+                inputs_embeds[special_audio_mask].numel() == audio_features.numel(),
+                f"Audio features and audio tokens do not match, tokens: {n_audio_tokens}, features: {audio_features.shape[0]}",
+            )
+        return special_image_mask, special_video_mask, special_audio_mask
 
     @auto_docstring
     def forward(
