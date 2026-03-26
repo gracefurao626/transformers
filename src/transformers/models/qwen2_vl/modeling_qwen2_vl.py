@@ -954,14 +954,9 @@ class Qwen2VLAudioModel(nn.Module):
             sampling_rate=self.feature_extractor.sampling_rate,
             return_tensors="pt"
         ).input_features.to(next(self.encoder.parameters()).device) # [batch, 128, 3000]
-        
 
         hidden_states = self.encoder(features).last_hidden_state # [batch, 1500, 1280]
-        
-        return hidden_states.view(-1, hidden_states.shape[-1]) # [batch * 1500, 1280]
-        
-    
-
+        return hidden_states
 
 
 @auto_docstring
@@ -975,8 +970,12 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
         super().__init__(config)
         self.visual = Qwen2VisionTransformerPretrainedModel._from_config(config.vision_config)
         self.language_model = Qwen2VLTextModel._from_config(config.text_config)
-        # refactor
-        self.audio = Qwen2VLAudioModel._from_config(config.audio_config)
+        # refactor: audio encoder + projection
+        self.audio = Qwen2VLAudioModel(config.audio_config)
+        self.audio_projection = nn.Linear(
+            config.audio_config.d_model,        # 1280
+            config.text_config.hidden_size      # 3584
+        )
         self.rope_deltas = None  # cache rope_deltas here
 
         # Initialize weights and apply final processing
@@ -1181,21 +1180,18 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
 
         return vision_outputs
     
-    # refactor
-    @can_return_tuple
-    @auto_docstring
+    # refactor: new get_audio_features
     def get_audio_features(
         self,
-        audio_values: torch.FloatTensor,
-        **kwargs: Unpack[TransformersKwargs],
-    ) -> tuple | BaseModelOutputWithPooling:
-        r"""
-        audio_values: 
+        audio_values: list,
+    ) -> torch.FloatTensor:
         """
-        audio_values = audio_values.type(self.audio.dtype)
-        audio_outputs = self.audio(audio_values, return_dict=True, **kwargs)
-        # need to add projection layer to match with the LLM embedding dimension
-        return audio_outputs
+        audio_values: list of 1D numpy arrays from process_vision_info
+        returns: [N_clips * 1500, 3584]
+        """
+        audio_embeds = self.audio(audio_values) # [batch, 1500, 1280]
+        audio_embeds = self.audio_projection(audio_embeds) # [batch, 1500, 3584]
+        return audio_embeds.view(-1, audio_embeds.shape[-1]) # [batch * 1500, 3584]
     
     def get_placeholder_mask(
         self,
@@ -1310,8 +1306,7 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
 
         # refactor: audio injection block — mirrors image and video blocks exactly
         if audio_values is not None:
-            audio_embeds = self.get_audio_features(audio_values)
-            # audio_embeds: [N_clips * 1500, 3584]
+            audio_embeds = self.get_audio_features(audio_values) # audio_embeds: [N_clips * 1500, 3584]
             audio_embeds = audio_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
             _, _, audio_mask = self.get_placeholder_mask(
                 input_ids, inputs_embeds=inputs_embeds, audio_features=audio_embeds
