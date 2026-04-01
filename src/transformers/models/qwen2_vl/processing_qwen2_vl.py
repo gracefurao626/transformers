@@ -21,6 +21,7 @@
 Processor class for Qwen2-VL.
 """
 
+from typing import Union
 import numpy as np
 
 from ...feature_extraction_utils import BatchFeature
@@ -29,6 +30,7 @@ from ...processing_utils import MultiModalData, ProcessingKwargs, ProcessorMixin
 from ...tokenization_utils_base import PreTokenizedInput, TextInput
 from ...utils import auto_docstring, logging
 from ...video_utils import VideoInput
+
 
 
 logger = logging.get_logger(__name__)
@@ -42,6 +44,9 @@ class Qwen2VLProcessorKwargs(ProcessingKwargs, total=False):
         },
     }
 
+AudioInput = Union[
+    np.ndarray, "torch.Tensor", list[np.ndarray], list["torch.Tensor"]
+]
 
 @auto_docstring
 class Qwen2VLProcessor(ProcessorMixin):
