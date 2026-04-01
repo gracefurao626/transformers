@@ -95,7 +95,7 @@ class Qwen2VLProcessor(ProcessorMixin):
             **kwargs,
         )
 
-        image_inputs = videos_inputs = {}
+        image_inputs = videos_inputs = audio_inputs = {}
         if images is not None:
             image_inputs = self.image_processor(images=images, **output_kwargs["images_kwargs"])
             image_grid_thw = image_inputs["image_grid_thw"]
