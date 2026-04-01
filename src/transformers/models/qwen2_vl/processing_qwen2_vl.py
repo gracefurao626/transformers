@@ -109,7 +109,12 @@ class Qwen2VLProcessor(ProcessorMixin):
             videos_inputs = self.video_processor(videos=videos, **output_kwargs["videos_kwargs"])
             video_grid_thw = videos_inputs["video_grid_thw"]
 
-        # To do: if audios is not None: Track individual waveform lengths
+        # If audios is not None: Track individual waveform lengths
+        if audios is not None:
+            audio_inputs = {
+                "audio_values": audios,                          # a list of np.ndarray: 1d waveform
+                "audio_lengths": [a.shape[0] for a in audios]    # [lengths]
+            }
 
         if not isinstance(text, list):
             text = [text]
