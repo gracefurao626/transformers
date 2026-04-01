@@ -1,3 +1,4 @@
+
 # Copyright 2024 The Qwen team, Alibaba Group and the HuggingFace Inc. team. All rights reserved.
 #
 # This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
@@ -20,6 +21,7 @@
 Processor class for Qwen2-VL.
 """
 
+from typing import Union
 import numpy as np
 
 from ...feature_extraction_utils import BatchFeature
@@ -28,6 +30,7 @@ from ...processing_utils import MultiModalData, ProcessingKwargs, ProcessorMixin
 from ...tokenization_utils_base import PreTokenizedInput, TextInput
 from ...utils import auto_docstring, logging
 from ...video_utils import VideoInput
+
 
 
 logger = logging.get_logger(__name__)
@@ -41,6 +44,9 @@ class Qwen2VLProcessorKwargs(ProcessingKwargs, total=False):
         },
     }
 
+AudioInput = Union[
+    np.ndarray, "torch.Tensor", list[np.ndarray], list["torch.Tensor"]
+]
 
 @auto_docstring
 class Qwen2VLProcessor(ProcessorMixin):
@@ -94,7 +100,7 @@ class Qwen2VLProcessor(ProcessorMixin):
             **kwargs,
         )
 
-        image_inputs = videos_inputs = {}
+        image_inputs = videos_inputs = audio_inputs = {}
         if images is not None:
             image_inputs = self.image_processor(images=images, **output_kwargs["images_kwargs"])
             image_grid_thw = image_inputs["image_grid_thw"]
@@ -103,7 +109,12 @@ class Qwen2VLProcessor(ProcessorMixin):
             videos_inputs = self.video_processor(videos=videos, **output_kwargs["videos_kwargs"])
             video_grid_thw = videos_inputs["video_grid_thw"]
 
-        # To do: if audios is not None: Track individual waveform lengths
+        # If audios is not None: Track individual waveform lengths
+        if audios is not None:
+            audio_inputs = {
+                "audio_values": np.concatenate([np.array(a) for a in audios]), # Concatenated list of np.ndarray: 1d waveform
+                "audio_lengths": [a.shape[0] for a in audios]                  # [lengths]
+            }
 
         if not isinstance(text, list):
             text = [text]
