@@ -1278,6 +1278,13 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
             The temporal, height and width of feature shape of each video in LLM.
         rope_deltas (`torch.LongTensor` of shape `(batch_size, )`, *optional*):
             The rope index difference between sequence length and multimodal rope.
+        audio_values (list of `np.ndarray`, *optional*):
+            Audio inputs as a list of 1D float32 numpy arrays, one per audio clip.
+            Each array is processed by the Whisper feature extractor into a mel
+            spectrogram of shape `(128, 3000)`, then encoded by the Whisper encoder
+            into hidden states of shape `(batch, 1500, 1280)`, and projected to the
+            LLM hidden size before being scattered into the input embeddings at
+            positions marked by `audio_token_id`.
         """
 
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -1414,6 +1421,16 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
         audio_values: torch.FloatTensor,
         audio_lengths: torch.LongTensor | None = None,
     ) -> torch.FloatTensor:
+        r"""
+        audio_values (list of `np.ndarray`):
+            Audio inputs as a list of 1D float32 numpy arrays, one per audio clip.
+            Each array is processed by the Whisper feature extractor and encoder,
+            then projected to the LLM hidden size. Returns a tensor of shape
+            `(num_clips * 1500, hidden_size)`.
+        audio_lengths (`torch.LongTensor`, *optional*):
+            Reserved for future use. Currently unused; all clips are padded or
+            truncated to a fixed 30-second context by the Whisper feature extractor.
+        """
         return self.model.get_audio_features(
             audio_values=audio_values
         )
@@ -1453,6 +1470,13 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
             The temporal, height and width of feature shape of each video in LLM.
         rope_deltas (`torch.LongTensor` of shape `(batch_size, )`, *optional*):
             The rope index difference between sequence length and multimodal rope.
+        audio_values (list of `np.ndarray`, *optional*):
+            Audio inputs as a list of 1D float32 numpy arrays, one per audio clip.
+            Each array is processed by the Whisper feature extractor into a mel
+            spectrogram of shape `(128, 3000)`, then encoded by the Whisper encoder
+            into hidden states of shape `(batch, 1500, 1280)`, and projected to the
+            LLM hidden size before being scattered into the input embeddings at
+            positions marked by `audio_token_id`.
 
         Example:
 
