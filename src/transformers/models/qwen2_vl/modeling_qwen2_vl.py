@@ -979,8 +979,8 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
         # refactor: audio encoder + projection
         self.audio = Qwen2VLAudioModel(config.audio_config)
         self.audio_projection = nn.Linear(
-            config.audio_config.d_model,        # 1280
-            config.text_config.hidden_size      # 3584
+            config.audio_config.d_model,        # 1280 — Whisper large encoder dim
+            config.text_config.hidden_size      # 3584 — LLM hidden size (from loaded checkpoint)
         )
         self.rope_deltas = None  # cache rope_deltas here
 
