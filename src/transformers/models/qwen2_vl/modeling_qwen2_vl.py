@@ -950,15 +950,12 @@ class Qwen2VLAudioModel(nn.Module):
 
     def forward(self, audio_values):
         # audio_values: list of 1D numpy arrays
-        encoder_device = next(self.encoder.parameters()).device
-        encoder_dtype = next(self.encoder.parameters()).dtype 
-        
         # Casting input features → encoder dtype
         features = self.feature_extractor(
             audio_values,
             sampling_rate=self.feature_extractor.sampling_rate,
             return_tensors="pt"
-        ).input_features.to(device=encoder_device, dtype=encoder_dtype) # [batch, 128, 3000]
+        ).input_features.to(device=self.encoder.device, dtype=self.encoder.dtype) # [batch, 128, 3000]
 
         hidden_states = self.encoder(features).last_hidden_state # [batch, 1500, 1280]
         return hidden_states
