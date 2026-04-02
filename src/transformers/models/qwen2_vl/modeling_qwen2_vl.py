@@ -951,6 +951,7 @@ class Qwen2VLAudioModel(nn.Module):
     def forward(self, audio_values, audio_lengths):
         # audio_values: list of 1D numpy arrays
         audio_list = torch.split(audio_values, audio_lengths.tolist())
+        audio_list = [a.cpu().numpy() for a in audio_list]
         
         # Casting input features → encoder dtype
         features = self.feature_extractor(
