@@ -284,17 +284,19 @@ class Qwen2VLConfig(PreTrainedConfig):
     ```"""
 
     model_type = "qwen2_vl"
-    sub_configs = {"vision_config": Qwen2VLVisionConfig, "text_config": Qwen2VLTextConfig}
+    sub_configs = {"vision_config": Qwen2VLVisionConfig, "text_config": Qwen2VLTextConfig, "audio_config": Qwen2VLAudioConfig}
     keys_to_ignore_at_inference = ["past_key_values"]
 
     def __init__(
         self,
         text_config=None,
         vision_config=None,
+        audio_config=None,
         image_token_id=151655,
         video_token_id=151656,
         vision_start_token_id=151652,
         vision_end_token_id=151653,
+        audio_token_id=151658,  # <|AUDIO|> token id from processor tokenizer
         tie_word_embeddings=False,
         **kwargs,
     ):
@@ -302,6 +304,11 @@ class Qwen2VLConfig(PreTrainedConfig):
             self.vision_config = self.sub_configs["vision_config"](**vision_config)
         elif vision_config is None:
             self.vision_config = self.sub_configs["vision_config"]()
+
+        if isinstance(audio_config, dict):
+            self.audio_config = self.sub_configs["audio_config"](**audio_config)
+        elif audio_config is None:
+            self.audio_config = self.sub_configs["audio_config"]()
 
         if isinstance(text_config, dict):
             self.text_config = self.sub_configs["text_config"](**text_config)
@@ -315,10 +322,11 @@ class Qwen2VLConfig(PreTrainedConfig):
 
         self.image_token_id = image_token_id
         self.video_token_id = video_token_id
+        self.audio_token_id = audio_token_id
         self.vision_start_token_id = vision_start_token_id
         self.vision_end_token_id = vision_end_token_id
         self.tie_word_embeddings = tie_word_embeddings
         super().__init__(**kwargs)
 
 
-__all__ = ["Qwen2VLConfig", "Qwen2VLTextConfig"]
+__all__ = ["Qwen2VLConfig", "Qwen2VLTextConfig", "Qwen2VLAudioConfig"]
