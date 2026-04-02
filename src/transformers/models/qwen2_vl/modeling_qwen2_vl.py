@@ -1190,14 +1190,16 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
     def get_audio_features(
         self,
         audio_values: list,
+        audio_lengths: torch.LongTensor,
     ) -> torch.FloatTensor:
         """
         audio_values: list of 1D numpy arrays from process_vision_info
-        returns: [N_clips * 1500, 3584]
+        audio_lengths: tensor of individual clip lengths for splitting
+        returns: [N_clips * 1500, LLM hidden_size (3584)]
         """
-        audio_embeds = self.audio(audio_values) # [batch, 1500, 1280]
-        audio_embeds = self.audio_projection(audio_embeds) # [batch, 1500, 3584]
-        return audio_embeds.view(-1, audio_embeds.shape[-1]) # [batch * 1500, 3584]
+        audio_embeds = self.audio(audio_values, audio_lengths)  # [batch, 1500, d_model(1280)]
+        audio_embeds = self.audio_projection(audio_embeds)      # [batch, 1500, hidden_size]
+        return audio_embeds.view(-1, audio_embeds.shape[-1])    # [batch * 1500, hidden_size]
     
     def get_placeholder_mask(
         self,
@@ -1274,6 +1276,7 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
         cache_position: torch.LongTensor | None = None,
         # refactor: new audio arguments
         audio_values: torch.FloatTensor | None = None,
+        audio_lengths: torch.LongTensor | None = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> tuple | Qwen2VLModelOutputWithPast:
         r"""
@@ -1290,6 +1293,10 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
             into hidden states of shape `(batch, 1500, 1280)`, and projected to the
             LLM hidden size before being scattered into the input embeddings at
             positions marked by `audio_token_id`.
+        audio_lengths (`torch.LongTensor` of shape `(num_clips,)`, *optional*):
+        Lengths of each individual audio clip in `audio_values`. Used to split
+        the concatenated 1D tensor back into individual clips before passing
+        to the Whisper feature extractor.
         """
 
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -1319,7 +1326,7 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
 
         # refactor: audio injection block — mirrors image and video blocks exactly
         if audio_values is not None:
-            audio_embeds = self.get_audio_features(audio_values) # audio_embeds: [N_clips * 1500, 3584]
+            audio_embeds = self.get_audio_features(audio_values, audio_lengths) # audio_embeds: [N_clips * 1500, 3584]
             audio_embeds = audio_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
             _, _, audio_mask = self.get_placeholder_mask(
                 input_ids, inputs_embeds=inputs_embeds, audio_features=audio_embeds
