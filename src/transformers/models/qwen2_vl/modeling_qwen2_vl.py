@@ -942,6 +942,7 @@ class Qwen2VLTextModel(Qwen2VLPreTrainedModel):
         )
 
 # Refactor: add Whisper feature extractor and encoder
+# To do: swap nn.Module for PreTrainedModel for fine-tuning
 class Qwen2VLAudioModel(nn.Module):
     def __init__(self, config):
         super().__init__()
