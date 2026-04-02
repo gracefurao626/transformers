@@ -22,6 +22,19 @@ from ...utils import logging
 
 logger = logging.get_logger(__name__)
 
+class Qwen2VLAudioConfig(PreTrainedConfig):
+    model_type = "qwen2_vl"
+    base_config_key = "audio_config"
+
+    def __init__(
+        self,
+        model_name="openai/whisper-large-v3-turbo",
+        d_model=1280,  # encoder output dim: 1280 for all large variants, 768 for small variant. 
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.model_name = model_name
+        self.d_model = d_model
 
 class Qwen2VLVisionConfig(PreTrainedConfig):
     model_type = "qwen2_vl"
