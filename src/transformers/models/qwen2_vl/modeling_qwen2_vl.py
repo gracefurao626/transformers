@@ -48,7 +48,7 @@ from ...utils import (
 from ...utils.generic import check_model_inputs, is_flash_attention_requested, maybe_autocast
 from ..qwen2.modeling_qwen2 import Qwen2RMSNorm
 from .configuration_qwen2_vl import Qwen2VLConfig, Qwen2VLTextConfig, Qwen2VLVisionConfig
-from transformers import WhisperFeatureExtractor, WhisperModel
+from transformers import WhisperFeatureExtractor, WhisperModel, WhisperConfig
 
 
 logger = logging.get_logger(__name__)
