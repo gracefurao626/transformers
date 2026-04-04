@@ -947,10 +947,18 @@ class Qwen2VLAudioModel(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.feature_extractor = WhisperFeatureExtractor.from_pretrained(config.model_name)
-        self.encoder = WhisperModel.from_pretrained(config.model_name).encoder
+        # Downloads config JSON only, no pretrained weights
+        whisper_config = WhisperConfig.from_pretrained(config.model_name)
+        # Initializes architecture with random weights, no checkpoint loading
+        # Whisper pretrained weights loaded explicitly after Qwen2VLModel.from_pretrained()
+        self.encoder = WhisperModel(whisper_config).encoder
 
     def forward(self, audio_values, audio_lengths):
-        # audio_values: list of 1D numpy arrays
+        """
+        audio_values: concatenated 1D tensor of all audio clips
+        audio_lengths: tensor of individual clip lengths for splitting
+        returns: [batch, 1500, encoder_dim]
+        """
         audio_list = torch.split(audio_values, audio_lengths.tolist())
         audio_list = [a.cpu().numpy() for a in audio_list]
         
