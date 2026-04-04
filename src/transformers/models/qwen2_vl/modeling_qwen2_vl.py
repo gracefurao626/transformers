@@ -942,7 +942,7 @@ class Qwen2VLTextModel(Qwen2VLPreTrainedModel):
         )
 
 # Refactor: add Whisper feature extractor and encoder
-# To do: swap nn.Module for PreTrainedModel for fine-tuning
+# To do: consider swapping nn.Module for PreTrainedModel for fine-tuning
 class Qwen2VLAudioModel(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -1197,7 +1197,7 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
     # refactor: new get_audio_features
     def get_audio_features(
         self,
-        audio_values: list,
+        audio_values: torch.FloatTensor,
         audio_lengths: torch.LongTensor,
     ) -> torch.FloatTensor:
         """
