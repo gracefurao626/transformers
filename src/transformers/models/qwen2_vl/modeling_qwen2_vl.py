@@ -1314,6 +1314,8 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if inputs_embeds is None:
+            # Note: input_ids must be on the same device as the embedding layer (model.device)
+            # Move inputs to the correct device before calling forward() e.g. input_ids.to(model.device)
             inputs_embeds = self.get_input_embeddings()(input_ids)
 
         if pixel_values is not None:
