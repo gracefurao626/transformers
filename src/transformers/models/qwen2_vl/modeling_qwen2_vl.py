@@ -1501,7 +1501,10 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
             into hidden states of shape `(batch, 1500, 1280)`, and projected to the
             LLM hidden size before being scattered into the input embeddings at
             positions marked by `audio_token_id`.
-        audio_lengths: tensor of individual clip lengths for splitting. 
+        audio_lengths (`torch.LongTensor` of shape `(num_clips,)`, *optional*):
+        Lengths of each individual audio clip in `audio_values`. Used to split
+        the concatenated 1D tensor back into individual clips before passing
+        to the Whisper feature extractor. 
 
         Example:
 
