@@ -1658,6 +1658,8 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
         if not is_first_iteration and use_cache:
             model_inputs["pixel_values"] = None
             model_inputs["pixel_values_videos"] = None
+            model_inputs["audio_values"] = None    
+            model_inputs["audio_lengths"] = None   
 
         return model_inputs
 
