@@ -1454,7 +1454,8 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
             truncated to a fixed 30-second context by the Whisper feature extractor.
         """
         return self.model.get_audio_features(
-            audio_values=audio_values
+            audio_values=audio_values, 
+            audio_lengths=audio_lengths
         )
 
     @can_return_tuple
@@ -1479,6 +1480,7 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
         logits_to_keep: int | torch.Tensor = 0,
         # refactor: new audio arguments
         audio_values: torch.FloatTensor | None = None,
+        audio_lengths: torch.LongTensor | None = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> tuple | Qwen2VLCausalLMOutputWithPast:
         r"""
@@ -1499,6 +1501,7 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
             into hidden states of shape `(batch, 1500, 1280)`, and projected to the
             LLM hidden size before being scattered into the input embeddings at
             positions marked by `audio_token_id`.
+        audio_lengths: tensor of individual clip lengths for splitting. 
 
         Example:
 
@@ -1559,6 +1562,7 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
             cache_position=cache_position,
             # refactor: pass audio through to Qwen2VLModel
             audio_values=audio_values,
+            audio_lengths=audio_lengths,
             **kwargs,
         )
 
