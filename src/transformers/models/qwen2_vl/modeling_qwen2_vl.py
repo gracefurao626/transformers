@@ -1603,6 +1603,8 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
         image_grid_thw=None,
         video_grid_thw=None,
         is_first_iteration=False,
+        audio_values=None,        
+        audio_lengths=None,  
         **kwargs,
     ):
         # Overwritten -- in specific circumstances we don't want to forward image inputs to the model
@@ -1620,6 +1622,8 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
             video_grid_thw=video_grid_thw,
             use_cache=use_cache,
             is_first_iteration=is_first_iteration,
+            audio_values=audio_values,    
+            audio_lengths=audio_lengths,
             **kwargs,
         )
 
