@@ -48,6 +48,7 @@ from ...utils import (
 from ...utils.generic import check_model_inputs, is_flash_attention_requested, maybe_autocast
 from ..qwen2.modeling_qwen2 import Qwen2RMSNorm
 from .configuration_qwen2_vl import Qwen2VLConfig, Qwen2VLTextConfig, Qwen2VLVisionConfig
+from transformers import WhisperFeatureExtractor, WhisperModel, WhisperConfig
 
 
 logger = logging.get_logger(__name__)
@@ -940,6 +941,37 @@ class Qwen2VLTextModel(Qwen2VLPreTrainedModel):
             attentions=all_self_attns,
         )
 
+# Refactor: add Whisper feature extractor and encoder
+# To do: consider swapping nn.Module for PreTrainedModel for fine-tuning
+class Qwen2VLAudioModel(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.feature_extractor = WhisperFeatureExtractor.from_pretrained(config.model_name)
+        # Downloads config JSON only, no pretrained weights
+        whisper_config = WhisperConfig.from_pretrained(config.model_name)
+        # Initializes architecture with random weights, no checkpoint loading
+        # Whisper pretrained weights loaded explicitly after Qwen2VLModel.from_pretrained()
+        self.encoder = WhisperModel(whisper_config).encoder
+
+    def forward(self, audio_values, audio_lengths):
+        """
+        audio_values: concatenated 1D tensor of all audio clips
+        audio_lengths: tensor of individual clip lengths for splitting
+        returns: [batch, 1500, encoder_dim]
+        """
+        audio_list = torch.split(audio_values, audio_lengths.tolist())
+        audio_list = [a.cpu().numpy() for a in audio_list]
+        
+        # Casting input features → encoder dtype
+        features = self.feature_extractor(
+            audio_list,
+            sampling_rate=self.feature_extractor.sampling_rate,
+            return_tensors="pt"
+        ).input_features.to(device=self.encoder.device, dtype=self.encoder.dtype) # [batch, n_mels (128), 3000]
+
+        hidden_states = self.encoder(features).last_hidden_state # [batch, 1500, encoder_dim(1280)]
+        return hidden_states
+
 
 @auto_docstring
 class Qwen2VLModel(Qwen2VLPreTrainedModel):
@@ -952,6 +984,12 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
         super().__init__(config)
         self.visual = Qwen2VisionTransformerPretrainedModel._from_config(config.vision_config)
         self.language_model = Qwen2VLTextModel._from_config(config.text_config)
+        # refactor: audio encoder + projection
+        self.audio = Qwen2VLAudioModel(config.audio_config)
+        self.audio_projection = nn.Linear(
+            config.audio_config.d_model,        # 1280 — Whisper large encoder dim
+            config.text_config.hidden_size      # 3584 — LLM hidden size (from loaded checkpoint)
+        )
         self.rope_deltas = None  # cache rope_deltas here
 
         # Initialize weights and apply final processing
@@ -1155,13 +1193,29 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
         vision_outputs.pooler_output = image_embeds
 
         return vision_outputs
-
+    
+    # refactor: new get_audio_features
+    def get_audio_features(
+        self,
+        audio_values: torch.FloatTensor,
+        audio_lengths: torch.LongTensor,
+    ) -> torch.FloatTensor:
+        """
+        audio_values: list of 1D numpy arrays from process_vision_info
+        audio_lengths: tensor of individual clip lengths for splitting
+        returns: [N_clips * 1500, LLM hidden_size (3584)]
+        """
+        audio_embeds = self.audio(audio_values, audio_lengths)  # [batch, 1500, d_model(1280)]
+        audio_embeds = self.audio_projection(audio_embeds)      # [batch, 1500, hidden_size]
+        return audio_embeds.view(-1, audio_embeds.shape[-1])    # [batch * 1500, hidden_size]
+    
     def get_placeholder_mask(
         self,
         input_ids: torch.LongTensor,
         inputs_embeds: torch.FloatTensor,
         image_features: torch.FloatTensor | None = None,
         video_features: torch.FloatTensor | None = None,
+        audio_features: torch.FloatTensor | None = None,
     ):
         """
         Obtains multimodal placeholder mask from `input_ids` or `inputs_embeds`, and checks that the placeholder token count is
@@ -1176,9 +1230,14 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
                 torch.tensor(self.config.video_token_id, dtype=torch.long, device=inputs_embeds.device)
             )
             special_video_mask = special_video_mask.all(-1)
+            special_audio_mask = inputs_embeds == self.get_input_embeddings()(
+                torch.tensor(self.config.audio_token_id, dtype=torch.long, device=inputs_embeds.device)
+            )
+            special_audio_mask = special_audio_mask.all(-1)
         else:
             special_image_mask = input_ids == self.config.image_token_id
             special_video_mask = input_ids == self.config.video_token_id
+            special_audio_mask = input_ids == self.config.audio_token_id
 
         n_image_tokens = special_image_mask.sum()
         special_image_mask = special_image_mask.unsqueeze(-1).expand_as(inputs_embeds).to(inputs_embeds.device)
@@ -1195,7 +1254,15 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
                 inputs_embeds[special_video_mask].numel() == video_features.numel(),
                 f"Video features and video tokens do not match, tokens: {n_video_tokens}, features: {video_features.shape[0]}",
             )
-        return special_image_mask, special_video_mask
+        
+        n_audio_tokens = special_audio_mask.sum()
+        special_audio_mask = special_audio_mask.unsqueeze(-1).expand_as(inputs_embeds).to(inputs_embeds.device)
+        if audio_features is not None:
+            torch_compilable_check(
+                inputs_embeds[special_audio_mask].numel() == audio_features.numel(),
+                f"Audio features and audio tokens do not match, tokens: {n_audio_tokens}, features: {audio_features.shape[0]}",
+            )
+        return special_image_mask, special_video_mask, special_audio_mask
 
     @auto_docstring
     def forward(
@@ -1215,6 +1282,9 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
         video_grid_thw: torch.LongTensor | None = None,
         rope_deltas: torch.LongTensor | None = None,
         cache_position: torch.LongTensor | None = None,
+        # refactor: new audio arguments
+        audio_values: torch.FloatTensor | None = None,
+        audio_lengths: torch.LongTensor | None = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> tuple | Qwen2VLModelOutputWithPast:
         r"""
@@ -1224,6 +1294,17 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
             The temporal, height and width of feature shape of each video in LLM.
         rope_deltas (`torch.LongTensor` of shape `(batch_size, )`, *optional*):
             The rope index difference between sequence length and multimodal rope.
+        audio_values (list of `np.ndarray`, *optional*):
+            Audio inputs as a list of 1D float32 numpy arrays, one per audio clip.
+            Each array is processed by the Whisper feature extractor into a mel
+            spectrogram of shape `(128, 3000)`, then encoded by the Whisper encoder
+            into hidden states of shape `(batch, 1500, 1280)`, and projected to the
+            LLM hidden size before being scattered into the input embeddings at
+            positions marked by `audio_token_id`.
+        audio_lengths (`torch.LongTensor` of shape `(num_clips,)`, *optional*):
+        Lengths of each individual audio clip in `audio_values`. Used to split
+        the concatenated 1D tensor back into individual clips before passing
+        to the Whisper feature extractor.
         """
 
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -1233,12 +1314,14 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if inputs_embeds is None:
+            # Note: input_ids must be on the same device as the embedding layer (model.device)
+            # Move inputs to the correct device before calling forward() e.g. input_ids.to(model.device)
             inputs_embeds = self.get_input_embeddings()(input_ids)
 
         if pixel_values is not None:
             image_embeds = self.get_image_features(pixel_values, image_grid_thw, return_dict=True).pooler_output
             image_embeds = torch.cat(image_embeds, dim=0).to(inputs_embeds.device, inputs_embeds.dtype)
-            image_mask, _ = self.get_placeholder_mask(
+            image_mask, _, _ = self.get_placeholder_mask(
                 input_ids, inputs_embeds=inputs_embeds, image_features=image_embeds
             )
             inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
@@ -1246,10 +1329,19 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
         if pixel_values_videos is not None:
             video_embeds = self.get_video_features(pixel_values_videos, video_grid_thw, return_dict=True).pooler_output
             video_embeds = torch.cat(video_embeds, dim=0).to(inputs_embeds.device, inputs_embeds.dtype)
-            _, video_mask = self.get_placeholder_mask(
+            _, video_mask, _ = self.get_placeholder_mask(
                 input_ids, inputs_embeds=inputs_embeds, video_features=video_embeds
             )
             inputs_embeds = inputs_embeds.masked_scatter(video_mask, video_embeds)
+
+        # refactor: audio injection block — mirrors image and video blocks exactly
+        if audio_values is not None:
+            audio_embeds = self.get_audio_features(audio_values, audio_lengths) # audio_embeds: [N_clips * 1500, 3584]
+            audio_embeds = audio_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
+            _, _, audio_mask = self.get_placeholder_mask(
+                input_ids, inputs_embeds=inputs_embeds, audio_features=audio_embeds
+            )
+            inputs_embeds = inputs_embeds.masked_scatter(audio_mask, audio_embeds)
 
         if position_ids is None:
             past_key_values_length = 0 if past_key_values is None else past_key_values.get_seq_length()
@@ -1343,6 +1435,29 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
         """
         return self.model.get_image_features(pixel_values=pixel_values, image_grid_thw=image_grid_thw, **kwargs)
 
+
+    # refactor: new wrapper — mirrors get_image_features and get_video_features exactly
+    @auto_docstring
+    def get_audio_features(
+        self,
+        audio_values: torch.FloatTensor,
+        audio_lengths: torch.LongTensor | None = None,
+    ) -> torch.FloatTensor:
+        r"""
+        audio_values (list of `np.ndarray`):
+            Audio inputs as a list of 1D float32 numpy arrays, one per audio clip.
+            Each array is processed by the Whisper feature extractor and encoder,
+            then projected to the LLM hidden size. Returns a tensor of shape
+            `(num_clips * 1500, hidden_size)`.
+        audio_lengths (`torch.LongTensor`, *optional*):
+            Reserved for future use. Currently unused; all clips are padded or
+            truncated to a fixed 30-second context by the Whisper feature extractor.
+        """
+        return self.model.get_audio_features(
+            audio_values=audio_values, 
+            audio_lengths=audio_lengths
+        )
+
     @can_return_tuple
     @auto_docstring
     def forward(
@@ -1363,6 +1478,9 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
         rope_deltas: torch.LongTensor | None = None,
         cache_position: torch.LongTensor | None = None,
         logits_to_keep: int | torch.Tensor = 0,
+        # refactor: new audio arguments
+        audio_values: torch.FloatTensor | None = None,
+        audio_lengths: torch.LongTensor | None = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> tuple | Qwen2VLCausalLMOutputWithPast:
         r"""
@@ -1376,6 +1494,17 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
             The temporal, height and width of feature shape of each video in LLM.
         rope_deltas (`torch.LongTensor` of shape `(batch_size, )`, *optional*):
             The rope index difference between sequence length and multimodal rope.
+        audio_values (list of `np.ndarray`, *optional*):
+            Audio inputs as a list of 1D float32 numpy arrays, one per audio clip.
+            Each array is processed by the Whisper feature extractor into a mel
+            spectrogram of shape `(128, 3000)`, then encoded by the Whisper encoder
+            into hidden states of shape `(batch, 1500, 1280)`, and projected to the
+            LLM hidden size before being scattered into the input embeddings at
+            positions marked by `audio_token_id`.
+        audio_lengths (`torch.LongTensor` of shape `(num_clips,)`, *optional*):
+            Lengths of each individual audio clip in `audio_values`. Used to split
+            the concatenated 1D tensor back into individual clips before passing
+            to the Whisper feature extractor. 
 
         Example:
 
@@ -1434,6 +1563,9 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
             output_hidden_states=output_hidden_states,
             return_dict=True,
             cache_position=cache_position,
+            # refactor: pass audio through to Qwen2VLModel
+            audio_values=audio_values,
+            audio_lengths=audio_lengths,
             **kwargs,
         )
 
@@ -1471,6 +1603,8 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
         image_grid_thw=None,
         video_grid_thw=None,
         is_first_iteration=False,
+        audio_values=None,        
+        audio_lengths=None,  
         **kwargs,
     ):
         # Overwritten -- in specific circumstances we don't want to forward image inputs to the model
@@ -1488,6 +1622,8 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
             video_grid_thw=video_grid_thw,
             use_cache=use_cache,
             is_first_iteration=is_first_iteration,
+            audio_values=audio_values,    
+            audio_lengths=audio_lengths,
             **kwargs,
         )
 
@@ -1522,6 +1658,8 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
         if not is_first_iteration and use_cache:
             model_inputs["pixel_values"] = None
             model_inputs["pixel_values_videos"] = None
+            model_inputs["audio_values"] = None    
+            model_inputs["audio_lengths"] = None   
 
         return model_inputs
 
@@ -1584,14 +1722,14 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
         **model_kwargs,
     ) -> tuple[torch.LongTensor, dict[str, Any]]:
         # Overwritten -- Support for expanding tensors without a batch size dimension
-        # e.g., pixel_values, image_grid_thw, pixel_values_videos, video_grid_thw, second_per_grid_t
+        # e.g., pixel_values, image_grid_thw, pixel_values_videos, video_grid_thw, second_per_grid_t, audio_values, audio_lengths
         # pixel_values.shape[0] is sum(seqlen_images for samples)
         # image_grid_thw.shape[0] is sum(num_images for samples)
 
         if expand_size == 1:
             return input_ids, model_kwargs
 
-        visual_keys = ["pixel_values", "image_grid_thw", "pixel_values_videos", "video_grid_thw", "second_per_grid_ts"]
+        visual_keys = ["pixel_values", "image_grid_thw", "pixel_values_videos", "video_grid_thw", "second_per_grid_ts", "audio_values", "audio_lengths"]
 
         def _expand_dict_for_generation_visual(dict_to_expand):
             image_grid_thw = model_kwargs.get("image_grid_thw", None)
@@ -1636,6 +1774,14 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
                     dict_to_expand[key] = _repeat_interleave_samples(
                         dict_to_expand[key], lengths=list(video_nums), repeat_times=expand_size
                     )
+                elif key == "audio_values":
+                    # split concatenated audio by audio_lengths, repeat each sample
+                    lengths = model_kwargs.get("audio_lengths").tolist()
+                    dict_to_expand[key] = _repeat_interleave_samples(
+                        dict_to_expand[key], lengths=lengths, repeat_times=expand_size
+                    )
+                elif key == "audio_lengths":
+                    dict_to_expand[key] = dict_to_expand[key].repeat_interleave(expand_size, dim=0)
             return dict_to_expand
 
         def _expand_dict_for_generation(dict_to_expand):

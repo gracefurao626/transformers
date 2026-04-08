@@ -112,8 +112,8 @@ class Qwen2VLProcessor(ProcessorMixin):
         # If audios is not None: Track individual waveform lengths
         if audios is not None:
             audio_inputs = {
-                "audio_values": np.concatenate([np.array(a) for a in audios]), # Concatenated list of np.ndarray: 1d waveform
-                "audio_lengths": [a.shape[0] for a in audios]                  # [lengths]
+                "audio_values": np.concatenate([np.array(a) for a in audios]), # Concatenated list of np.ndarray: 1d waveform because Batching variable-length audio is non-trivial 
+                "audio_lengths": np.array([a.shape[0] for a in audios], dtype=np.int64) # [audio lengths]
             }
 
         if not isinstance(text, list):
