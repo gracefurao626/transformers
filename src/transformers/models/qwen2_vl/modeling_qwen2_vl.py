@@ -657,7 +657,7 @@ class Qwen2VLDecoderLayer(GradientCheckpointingLayer):
 class Qwen2VLPreTrainedModel(PreTrainedModel):
     config: Qwen2VLConfig
     base_model_prefix = "model"
-    input_modalities = ("image", "video", "text")
+    input_modalities = ("image", "video", "text", "audio")
     supports_gradient_checkpointing = True
     _no_split_modules = ["Qwen2VLDecoderLayer", "Qwen2VLVisionBlock"]
     _skip_keys_device_placement = "past_key_values"
@@ -1386,6 +1386,7 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
 class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
     _checkpoint_conversion_mapping = {
         "^visual": "model.visual",
+        "^audio": "model.audio",
         r"^model(?!\.(language_model|visual))": "model.language_model",
     }
     _tied_weights_keys = {"lm_head.weight": "model.language_model.embed_tokens.weight"}
