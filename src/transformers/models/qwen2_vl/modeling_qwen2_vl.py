@@ -1387,7 +1387,7 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
     _checkpoint_conversion_mapping = {
         "^visual": "model.visual",
         "^audio": "model.audio",
-        r"^model(?!\.(language_model|visual))": "model.language_model",
+        r"^model(?!\.(language_model|visual|audio))": "model.language_model",
     }
     _tied_weights_keys = {"lm_head.weight": "model.language_model.embed_tokens.weight"}
 
